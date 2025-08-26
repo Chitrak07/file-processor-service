@@ -12,7 +12,7 @@ A powerful Spring Boot web service for converting, compressing, and managing doc
 </p>
 
 <p align="center">
-  <em>(Replace this with a GIF or screenshot of your application in action)</em>
+
   <br>
   <img src="https://placehold.co/800x450/f4f7f6/333?text=App+Screenshot+Here" alt="Application Screenshot">
 </p>
@@ -78,7 +78,7 @@ Follow these instructions to get a copy of the project up and running on your lo
 
 4.  **Access the application:**
     Once the application is running, open your web browser and navigate to:
-    [**http://localhost:8080**](http://localhost:8080)
+    [**http://localhost:8081**](http://localhost:8081)
 
 ## 🔌 API Endpoints
 
