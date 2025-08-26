@@ -2,114 +2,129 @@ package com.docutools.fileprocessorservice.service;
 
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfReader;
-import com.itextpdf.kernel.pdf.PdfWriter;
-import com.itextpdf.kernel.pdf.WriterProperties;
-import net.coobird.thumbnailator.Thumbnails;
-// Import the Loader class
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDPageContentStream;
-import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
-import org.apache.pdfbox.text.PDFTextStripper;
-import org.docx4j.Docx4J;
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.docx4j.TextUtils;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 public class ConversionService {
 
-    @Value("${file.upload-dir}")
-    private String uploadDir;
+    /**
+     * Extracts text content from a given file (PDF, DOCX, XLSX).
+     * @param file The MultipartFile to process.
+     * @return The extracted text as a String.
+     */
+    public String extractText(MultipartFile file) throws Exception {
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null) {
+            throw new IllegalArgumentException("File name is null.");
+        }
+        String fileExtension = getFileExtension(originalFilename);
 
-    public Path saveFile(MultipartFile file) throws IOException {
+        try (InputStream inputStream = file.getInputStream()) {
+            return switch (fileExtension) {
+                case ".pdf" -> extractTextFromPdf(inputStream);
+                case ".docx" -> extractTextFromDocx(inputStream);
+                case ".xlsx" -> extractTextFromXlsx(inputStream);
+                default -> "Unsupported file type for text extraction: " + fileExtension;
+            };
+        }
+    }
+
+    /**
+     * Saves an uploaded file to a local 'uploads' directory.
+     * @param file The MultipartFile to save.
+     * @return The absolute path of the saved file.
+     */
+    public String saveFile(MultipartFile file) throws IOException {
+        String uploadDir = "uploads/";
         Path uploadPath = Paths.get(uploadDir);
+
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
-        String uniqueFileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        Path filePath = uploadPath.resolve(uniqueFileName);
-        Files.copy(file.getInputStream(), filePath);
-        return filePath;
-    }
 
-    public Path convertPdfToWord(Path pdfPath) throws Exception {
-        // --- THIS IS THE CORRECTED LINE ---
-        try (PDDocument pdf = Loader.loadPDF(pdfPath.toFile())) {
-            PDFTextStripper stripper = new PDFTextStripper();
-            String text = stripper.getText(pdf);
-
-            WordprocessingMLPackage wordPackage = WordprocessingMLPackage.createPackage();
-            wordPackage.getMainDocumentPart().addParagraphOfText(text);
-
-            Path wordPath = Paths.get(uploadDir, pdfPath.getFileName().toString().replace(".pdf", ".docx"));
-            wordPackage.save(wordPath.toFile());
-            return wordPath;
+        if (file.getOriginalFilename() == null) {
+            throw new IOException("File has no name.");
         }
+
+        Path filePath = uploadPath.resolve(file.getOriginalFilename());
+        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+
+        return filePath.toAbsolutePath().toString();
     }
 
-    public Path convertWordToPdf(Path wordPath) throws Exception {
-        try (InputStream is = new FileInputStream(wordPath.toFile())) {
-            WordprocessingMLPackage wordPackage = WordprocessingMLPackage.load(is);
-            Path pdfPath = Paths.get(uploadDir, wordPath.getFileName().toString().replace(".docx", ".pdf"));
-            try (OutputStream os = new FileOutputStream(pdfPath.toFile())) {
-                Docx4J.toPDF(wordPackage, os);
-                os.flush();
+    private String getFileExtension(String fileName) {
+        int lastIndexOf = fileName.lastIndexOf(".");
+        if (lastIndexOf == -1) {
+            return ""; // no extension
+        }
+        return fileName.substring(lastIndexOf).toLowerCase();
+    }
+
+    private String extractTextFromPdf(InputStream inputStream) throws IOException {
+        StringBuilder text = new StringBuilder();
+        try (PdfReader reader = new PdfReader(inputStream);
+             PdfDocument pdfDocument = new PdfDocument(reader)) {
+            int numPages = pdfDocument.getNumberOfPages();
+            for (int i = 1; i <= numPages; i++) {
+                text.append(PdfTextExtractor.getTextFromPage(pdfDocument.getPage(i)));
+                text.append("\n");
             }
-            return pdfPath;
         }
+        return text.toString();
     }
 
-    public Path convertImagesToPdf(List<MultipartFile> imageFiles) throws IOException {
-        Path pdfPath = Paths.get(uploadDir, UUID.randomUUID() + ".pdf");
-        try (PDDocument document = new PDDocument()) {
-            for (MultipartFile file : imageFiles) {
-                PDPage page = new PDPage(PDRectangle.A4);
-                document.addPage(page);
-                PDImageXObject pdImage = PDImageXObject.createFromByteArray(document, file.getBytes(), file.getOriginalFilename());
+    private String extractTextFromDocx(InputStream inputStream) throws Exception {
+        WordprocessingMLPackage wordMLPackage = WordprocessingMLPackage.load(inputStream);
+        List<Object> content = wordMLPackage.getMainDocumentPart().getContent();
+        StringWriter sw = new StringWriter();
+        for (Object o : content) {
+            TextUtils.extractText(o, sw);
+        }
+        return sw.toString();
+    }
 
-                // Scale image to fit page width
-                float pageWidth = page.getMediaBox().getWidth() - 40; // with margin
-                float pageHeight = page.getMediaBox().getHeight() - 40;
-                float scale = Math.min(pageWidth / pdImage.getWidth(), pageHeight / pdImage.getHeight());
-                float scaledWidth = pdImage.getWidth() * scale;
-                float scaledHeight = pdImage.getHeight() * scale;
-
-                try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
-                    contentStream.drawImage(pdImage, 20, pageHeight - scaledHeight + 20, scaledWidth, scaledHeight);
+    private String extractTextFromXlsx(InputStream inputStream) throws IOException {
+        StringBuilder text = new StringBuilder();
+        try (XSSFWorkbook workbook = new XSSFWorkbook(inputStream)) {
+            for (Sheet sheet : workbook) {
+                for (Row row : sheet) {
+                    for (Cell cell : row) {
+                        text.append(getCellStringValue(cell)).append("\t");
+                    }
+                    text.append("\n");
                 }
             }
-            document.save(pdfPath.toFile());
         }
-        return pdfPath;
+        return text.toString();
     }
 
-    public Path compressPdf(Path pdfPath) throws IOException {
-        Path compressedPdfPath = Paths.get(uploadDir, "compressed_" + pdfPath.getFileName());
-        PdfReader reader = new PdfReader(pdfPath.toString());
-        PdfWriter writer = new PdfWriter(compressedPdfPath.toString(), new WriterProperties().setFullCompressionMode(true));
-        PdfDocument pdfDoc = new PdfDocument(reader, writer);
-        pdfDoc.close();
-        return compressedPdfPath;
-    }
-
-    public byte[] compressImage(MultipartFile imageFile, float quality) throws IOException {
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            Thumbnails.of(imageFile.getInputStream())
-                    .scale(1.0)
-                    .outputQuality(quality)
-                    .toOutputStream(outputStream);
-            return outputStream.toByteArray();
+    private String getCellStringValue(Cell cell) {
+        if (cell == null) {
+            return "";
         }
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue();
+            case NUMERIC -> String.valueOf(cell.getNumericCellValue());
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            case FORMULA -> cell.getCellFormula();
+            default -> "";
+        };
     }
 }

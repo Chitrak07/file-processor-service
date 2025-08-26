@@ -1,56 +1,55 @@
 package com.docutools.fileprocessorservice.controller;
 
+import com.docutools.fileprocessorservice.service.ConversionService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 
 @Controller
 public class ViewController {
 
+    private final ConversionService conversionService;
+
+    @Autowired
+    public ViewController(ConversionService conversionService) {
+        this.conversionService = conversionService;
+    }
+
     /**
-     * Handles the request for the main home page.
-     * @return The name of the index.jsp view.
+     * Handles GET requests to the root URL ("/") and displays the main upload page.
+     * @return The name of the HTML template to render ("index").
      */
     @GetMapping("/")
-    public String index() {
+    public String showUploadForm() {
         return "index";
     }
 
     /**
-     * Handles the request for the PDF to Word converter page.
-     * @return The name of the pdf-to-word.jsp view.
+     * Handles the file upload form submission. It processes the file and returns
+     * the result to the same page.
+     * @param file The uploaded file from the form.
+     * @param model The model to add attributes to for the view.
+     * @return The name of the HTML template to render ("index").
      */
-    @GetMapping("/pdf-to-word")
-    public String pdfToWordPage() {
-        return "pdf-to-word";
-    }
+    @PostMapping("/upload-and-process")
+    public String handleFileUpload(@RequestParam("file") MultipartFile file, Model model) {
+        if (file.isEmpty()) {
+            model.addAttribute("errorMessage", "Please select a file to process.");
+            return "index";
+        }
 
-    /**
-     * Handles the request for the Word to PDF converter page.
-     * @return The name of the word-to-pdf.jsp view.
-     */
-    @GetMapping("/word-to-pdf")
-    public String wordToPdfPage() {
-        return "word-to-pdf";
-    }
+        try {
+            String extractedText = conversionService.extractText(file);
+            model.addAttribute("extractedText", extractedText);
+        } catch (Exception e) {
+            e.printStackTrace();
+            model.addAttribute("errorMessage", "Error processing file: " + e.getMessage());
+        }
 
-    /**
-     * Handles the request for the Image to PDF converter page.
-     * @return The name of the image-to-pdf.jsp view.
-     */
-    @GetMapping("/image-to-pdf")
-    public String imageToPdfPage() {
-        return "image-to-pdf";
-    }
-
-    /**
-     * A simple test endpoint to verify the controller is working.
-     * If you can access /ping, the controller is correctly mapped.
-     * @return A simple string "Pong!".
-     */
-    @GetMapping("/ping")
-    @ResponseBody
-    public String ping() {
-        return "Pong! The ViewController is working.";
+        return "index";
     }
 }
