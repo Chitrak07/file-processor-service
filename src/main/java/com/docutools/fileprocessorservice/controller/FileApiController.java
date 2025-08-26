@@ -1,49 +1,41 @@
 package com.docutools.fileprocessorservice.controller;
 
-import com.docutools.fileprocessorservice.service.ConversionService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
+import java.net.MalformedURLException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 @RestController
 @RequestMapping("/api/files")
 public class FileApiController {
 
-    private final ConversionService conversionService;
+    private final Path generatedFileDir = Paths.get("generated-files");
 
-    @Autowired
-    public FileApiController(ConversionService conversionService) {
-        this.conversionService = conversionService;
-    }
-
-    @PostMapping("/process")
-    public ResponseEntity<String> processFile(@RequestParam("file") MultipartFile file) {
-        if (file.isEmpty()) {
-            return ResponseEntity.badRequest().body("Cannot process an empty file.");
-        }
+    @GetMapping("/download/{filename:.+}")
+    public ResponseEntity<Resource> downloadFile(@PathVariable String filename) {
         try {
-            String extractedText = conversionService.extractText(file);
-            return ResponseEntity.ok(extractedText);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Error processing file: " + e.getMessage());
-        }
-    }
+            Path filePath = this.generatedFileDir.resolve(filename).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
 
-    @PostMapping("/upload")
-    public ResponseEntity<String> uploadFile(@RequestParam("file") MultipartFile file) {
-        if (file.isEmpty()) {
-            return ResponseEntity.badRequest().body("Please select a file to upload.");
-        }
-        try {
-            String savedFilePath = conversionService.saveFile(file);
-            return ResponseEntity.ok("File uploaded successfully: " + savedFilePath);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Failed to upload file: " + e.getMessage());
+            if (resource.exists() || resource.isReadable()) {
+                return ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
+                        .body(resource);
+            } else {
+                throw new RuntimeException("Could not read the file!");
+            }
+        } catch (MalformedURLException e) {
+            throw new RuntimeException("Error: " + e.getMessage());
         }
     }
 }
